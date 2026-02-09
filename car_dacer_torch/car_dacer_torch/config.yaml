@@ -21,7 +21,10 @@ training:  # 训练与阶段管理
   log_save_interval: 1000          # TensorBoard 记录间隔
   apprfunc_save_interval: 1000     # 模型/缓冲保存间隔
   policy_update_time: 1           # 预留字段
-  demo_data_path: null            # 如需加载已有 demo，可填路径
+  # demo_data_path: null            # 单个buffer文件路径
+  # demo_data_path: "/home/nvidia/Autodrive/results/DACER_TORCH_CAR/buffers/buffer_00001234.pkl"
+  demo_data_dir: null              # 批量加载目录（会加载目录下所有buffer_*.pkl和segment_*.pkl文件）
+  # demo_data_dir: "/home/nvidia/Autodrive/results/DACER_TORCH_CAR/buffers/"
   use_one_step_delay: true        # one-step delay 经验对齐
   phase1_collect_only_intervention: true  # Phase1 仅收接管样本
   phase3_human_mix_ratio: 0.5     # Phase3 训练混合 demo 比例

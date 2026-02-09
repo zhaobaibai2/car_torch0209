@@ -189,6 +189,146 @@ class CarDACERTorch(Node):
         self.phase_manager = PhaseManager()
         self.phase_manager.phase1_threshold = int(self.config['training']['phase1_episodes'])
         self.phase_manager.phase2_threshold = int(self.config['training']['phase2_updates'])
+        
+        # 加载已有buffer数据（如果配置了路径）
+        self._load_existing_buffer()
+
+    def _load_existing_buffer(self):
+        """加载已有buffer数据并直接进入Phase2"""
+        demo_data_path = self.config.get('training', {}).get('demo_data_path')
+        demo_data_dir = self.config.get('training', {}).get('demo_data_dir')
+        
+        loaded_any = False
+        
+        # 方案1：加载单个文件
+        if demo_data_path and os.path.exists(demo_data_path):
+            try:
+                self.get_logger().info(f"[加载Buffer] 正在加载单个文件: {demo_data_path}")
+                self.buffer.load(demo_data_path)
+                loaded_any = True
+            except Exception as e:
+                self.get_logger().error(f"[加载Buffer] 单文件加载失败: {e}")
+        
+        # 方案2：批量加载目录下的所有buffer文件
+        elif demo_data_dir and os.path.exists(demo_data_dir):
+            try:
+                self.get_logger().info(f"[加载Buffer] 正在批量加载目录: {demo_data_dir}")
+                self._load_multiple_buffers(demo_data_dir)
+                loaded_any = True
+            except Exception as e:
+                self.get_logger().error(f"[加载Buffer] 批量加载失败: {e}")
+        
+        # 方案3：自动搜索最近的buffer文件
+        else:
+            try:
+                self.get_logger().info("[加载Buffer] 未指定路径，尝试自动搜索最近的buffer文件...")
+                found_path = self._auto_find_latest_buffer()
+                if found_path:
+                    self.buffer.load(found_path)
+                    loaded_any = True
+                    self.get_logger().info(f"[加载Buffer] 自动找到并加载: {found_path}")
+                else:
+                    self.get_logger().info("[加载Buffer] 未找到已有的buffer文件")
+            except Exception as e:
+                self.get_logger().error(f"[加载Buffer] 自动搜索失败: {e}")
+        
+        # 如果成功加载了数据，设置为Phase2
+        if loaded_any:
+            self.phase_manager.current_phase = 2
+            self.phase_manager.phase1_episodes = self.phase_manager.phase1_threshold  # 标记Phase1已完成
+            
+            buffer_stats = self.buffer.get_statistics()
+            self.get_logger().info(
+                f"[加载Buffer] 加载完成 - Human: {buffer_stats['human_size']} "
+                f"PVP: {buffer_stats['pvp_size']} | 直接进入Phase2离线更新"
+            )
+            
+            tjitools.ros_log(self.get_name(), "Loaded existing buffer(s) and entered Phase2")
+        else:
+            self.get_logger().info("[初始化] 未加载任何buffer数据，从Phase1开始")
+
+    def _load_multiple_buffers(self, directory: str):
+        """批量加载目录下的所有buffer文件"""
+        import glob
+        
+        # 搜索所有buffer_*.pkl文件
+        pattern = os.path.join(directory, "buffer_*.pkl")
+        buffer_files = glob.glob(pattern)
+        
+        # 也搜索segment文件（如果有的话）
+        segment_pattern = os.path.join(directory, "segment_*.pkl")
+        segment_files = glob.glob(segment_pattern)
+        
+        all_files = buffer_files + segment_files
+        
+        if not all_files:
+            self.get_logger().warning(f"[批量加载] 目录中未找到buffer文件: {directory}")
+            return
+        
+        # 按文件名排序（通常包含时间戳）
+        all_files.sort()
+        
+        self.get_logger().info(f"[批量加载] 找到 {len(all_files)} 个文件")
+        
+        loaded_count = 0
+        total_human = 0
+        total_pvp = 0
+        
+        for file_path in all_files:
+            try:
+                self.get_logger().info(f"[批量加载] 正在加载: {os.path.basename(file_path)}")
+                
+                # 创建临时buffer来加载单个文件
+                temp_buffer = TorchPVPBuffer(
+                    max_size=self.buffer.max_size,
+                    obs_dim=self.buffer.obs_dim,
+                    act_dim=self.buffer.act_dim,
+                )
+                temp_buffer.load(file_path)
+                
+                # 合并到主buffer
+                for exp in list(temp_buffer.human_buffer):
+                    self.buffer.add_human(exp)
+                    total_human += 1
+                
+                for exp in list(temp_buffer.pvp_buffer):
+                    self.buffer.add_pvp(exp)
+                    total_pvp += 1
+                
+                loaded_count += 1
+                self.get_logger().info(f"[批量加载] 完成: {os.path.basename(file_path)} "
+                                     f"(Human: {len(temp_buffer.human_buffer)}, PVP: {len(temp_buffer.pvp_buffer)})")
+                
+            except Exception as e:
+                self.get_logger().error(f"[批量加载] 文件加载失败 {file_path}: {e}")
+                continue
+        
+        self.get_logger().info(f"[批量加载] 总结: 加载了 {loaded_count}/{len(all_files)} 个文件 "
+                             f"(总Human: {total_human}, 总PVP: {total_pvp})")
+
+    def _auto_find_latest_buffer(self) -> str:
+        """自动搜索最新的buffer文件"""
+        import glob
+        
+        # 搜索常见的buffer目录
+        search_paths = [
+            "/home/nvidia/Autodrive/results/DACER_TORCH_CAR_*/buffers/",
+            "/home/nvidia/Autodrive/results/*/buffers/",
+            "./buffers/",
+            "../buffers/",
+        ]
+        
+        for search_path in search_paths:
+            expanded_paths = glob.glob(search_path)
+            for path in expanded_paths:
+                if os.path.exists(path):
+                    buffer_files = glob.glob(os.path.join(path, "buffer_*.pkl"))
+                    if buffer_files:
+                        # 按修改时间排序，选择最新的
+                        latest_file = max(buffer_files, key=os.path.getmtime)
+                        return latest_file
+        
+        return None
 
     def on_press(self, key):
         """监听按键：P 键切换暂停状态。"""
