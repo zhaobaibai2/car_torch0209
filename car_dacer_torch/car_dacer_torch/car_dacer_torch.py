@@ -4,6 +4,7 @@ import sys
 import time
 import json
 import copy
+import pickle
 import yaml
 from collections import deque
 
@@ -63,9 +64,15 @@ class CarDACERTorch(Node):
         self.phase1_collect_only_intervention = bool(training_cfg.get('phase1_collect_only_intervention', False))
         self.phase3_human_mix_ratio = float(training_cfg.get('phase3_human_mix_ratio', 0.5))
         self.phase2_bc_updates_per_iter = int(training_cfg.get('phase2_bc_updates_per_iter', 1))
+        self.log_detail_interval = int(training_cfg.get('log_detail_interval', 10))  # 详细日志打印间隔，防止刷屏
 
         self._prev_state = None
         self._prev_action_novice = None
+
+        # 分段数据缓存：用于按 P 暂停时立即落盘当前段
+        self.segment_human_buffer = []
+        self.segment_pvp_buffer = []
+        self.segment_idx = 0
 
         # 按键 P 暂停/恢复数据采集（参考 car_rl）
         self.is_paused = False
@@ -190,8 +197,77 @@ class CarDACERTorch(Node):
                 self.is_paused = not self.is_paused
                 status = "PAUSED" if self.is_paused else "RESUMED"
                 tjitools.ros_log(self.get_name(), f"System {status}")
+
+                # 当切换到暂停时，立即把当前段数据保存下来
+                if self.is_paused:
+                    self._save_segment_data()
         except AttributeError:
             pass
+
+    def _log_step_detail(self, intervention: float, action_behavior: np.ndarray, action_novice: np.ndarray):
+        """打印采样输入/模型输出/人工动作，便于对齐数据。"""
+        msg = self.rcvMsgSurroundingInfo
+        throttle_h, brake_h, steer_h = (
+            msg.throttle_percentage,
+            msg.braking_percentage,
+            msg.steerangle,
+        )
+
+        th_pred, br_pred, steer_pred = self.process_action(action_novice)
+        state_preview = {
+            "iter": self.iteration,
+            "yaw_err": float(msg.error_yaw),
+            "dist_err": float(msg.error_distance),
+            "speed": float(msg.carspeed),
+            "run_mode": int(msg.car_run_mode),
+        }
+
+        self.get_logger().info(
+            "[采样明细] {iter} | run_mode:{run_mode} inter:{inter:.1f}\n"
+            "  state(yaw:{yaw_err:.2f}, dist:{dist_err:.2f}, v:{speed:.2f})\n"
+            "  Human(th:{th_h:.0f}, br:{br_h:.0f}, steer:{st_h:.1f}) | Model(th:{th_p:.0f}, br:{br_p:.0f}, steer:{st_p:.1f})".format(
+                inter=intervention,
+                th_h=throttle_h,
+                br_h=brake_h,
+                st_h=steer_h,
+                th_p=th_pred,
+                br_p=br_pred,
+                st_p=steer_pred,
+                **state_preview,
+            )
+        )
+
+    def _save_segment_data(self):
+        """将当前分段的采样数据落盘，便于按场景切片保存。"""
+        if not self.segment_human_buffer and not self.segment_pvp_buffer:
+            self.get_logger().info("[P段保存] 当前段没有数据可保存，跳过。")
+            return
+
+        buffers_dir = os.path.join(self.config['save_folder'], 'buffers')
+        os.makedirs(buffers_dir, exist_ok=True)
+
+        file_name = f"segment_{self.segment_idx:04d}_iter_{self.iteration:08d}.pkl"
+        file_path = os.path.join(buffers_dir, file_name)
+
+        payload = {
+            'human': list(self.segment_human_buffer),
+            'pvp': list(self.segment_pvp_buffer),
+            'iteration': self.iteration,
+            'phase': self.phase_manager.current_phase,
+        }
+
+        try:
+            with open(file_path, 'wb') as f:
+                pickle.dump(payload, f)
+            self.get_logger().info(f"[P段保存] 已保存分段数据 -> {file_path}")
+            tjitools.ros_log(self.get_name(), f"Segment saved: {file_name}")
+            self.segment_idx += 1
+        except Exception as e:
+            self.get_logger().error(f"[P段保存] 保存失败: {e}")
+
+        # 重置当前段缓存
+        self.segment_human_buffer.clear()
+        self.segment_pvp_buffer.clear()
 
     def sub_callback_surrounding(self, msgSurroundingInfo: SurroundingInfoInterface):
         self.rcvMsgSurroundingInfo = msgSurroundingInfo
@@ -496,6 +572,9 @@ class CarDACERTorch(Node):
                             continue
                         self.buffer.add_human(exp)
                         self.buffer.add_pvp(exp)
+                        # 记录分段数据，便于按 P 保存
+                        self.segment_human_buffer.append(exp)
+                        self.segment_pvp_buffer.append(exp)
                         self.phase_manager.update_progress(episodes=1)
 
                         if self.phase_manager.should_transition_to_phase2():
@@ -507,7 +586,19 @@ class CarDACERTorch(Node):
                     else:
                         if exp.interventions > 0.5:
                             self.buffer.add_human(exp)
+                            self.segment_human_buffer.append(exp)
                         self.buffer.add_pvp(exp)
+                        self.segment_pvp_buffer.append(exp)
+
+                # 打印采样明细（节流），与 car_rl 一致地看到模型输出 vs 实际输出
+                if self.iteration % self.log_detail_interval == 0 and exps:
+                    # 使用第一个 exp 的行为动作作为参考
+                    ref_exp = exps[0]
+                    self._log_step_detail(
+                        intervention=ref_exp.interventions,
+                        action_behavior=ref_exp.actions_behavior,
+                        action_novice=ref_exp.actions_novice,
+                    )
 
         stats = self.buffer.get_statistics()
 
