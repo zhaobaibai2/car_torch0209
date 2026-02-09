@@ -1,0 +1,72 @@
+# PVP-DACER (Torch) 实车配置
+# 仅 PyTorch，不依赖 JAX
+framework: "torch"
+seed: 42
+
+env:  # 环境/观测动作维度
+  state_dim: 344
+  action_dim: 2
+  max_action: [1.0, 1.0]
+  min_action: [-1.0, -1.0]
+
+training:  # 训练与阶段管理
+  phase1_episodes: 12000           # Phase1 收集接管/行为数据的步数（按迭代计数）
+  phase2_updates: 100000           # Phase2 离线 BC 目标总更新次数
+  phase3_interval: 100            # 预留字段（暂未用到，可保留）
+  buffer_warm_size: 1000           # 开始训练前 human buffer 最小大小
+  update_interval: 5             # 每隔多少循环触发一次训练
+  phase2_bc_updates_per_iter: 100   # Phase2 每次触发做几步 BC，调大=更快完成 Phase2
+  replay_batch_size: 64           # 训练批大小（BC/PVP 共用）
+  max_iteration: 1000000
+  log_save_interval: 1000          # TensorBoard 记录间隔
+  apprfunc_save_interval: 1000     # 模型/缓冲保存间隔
+  policy_update_time: 1           # 预留字段
+  demo_data_path: null            # 如需加载已有 demo，可填路径
+  use_one_step_delay: true        # one-step delay 经验对齐
+  phase1_collect_only_intervention: true  # Phase1 仅收接管样本
+  phase3_human_mix_ratio: 0.5     # Phase3 训练混合 demo 比例
+
+algorithm:  # 算法超参
+  gamma: 0.99
+  lr: 0.0001
+  alpha_lr: 0.03
+  tau: 0.005
+  delay_update: 1                 # 策略/BC 更新频率（每 delay_update 次 Q 更新后做一次）
+  delay_alpha_update: 1000        # alpha 更新间隔（fix_alpha=false 时有效）
+  reward_scale: 1.0
+  target_entropy: -2.0
+  num_timesteps: 10               # 扩散步数（越小越快，精度略降）
+  num_samples: 100                # 采样数（推理/训练加噪）
+  lambda_pv: 1.0                  # PV 损失权重
+  B: 1.0                          # PV 边界 B
+  lambda_bc: 5.0                  # BC boost 权重（干预段）
+  reward_free: true               # 干预段屏蔽 TD（无回报模式）
+  phase3_use_bc_boost: true       # Phase3 干预样本做 diffusion BC boost
+  fix_alpha: true                 # 固定 alpha，不自适应
+  init_alpha: 0.1                 # 初始 alpha（fix_alpha 时固定为此）
+  action_noise_scale: 0.05        # 动作探索噪声尺度
+
+network:  # 网络结构
+  hidden_dims: [256, 256, 256]
+  diffusion_hidden_dims: [256, 256, 256]
+  time_dim: 16
+  activation: "relu"
+  use_layer_norm: true
+
+safety:  # 安全阈值（逻辑见 safety_manager.py）
+  takeover_threshold: 0.8         # 接管判定阈值（预留）
+  max_steering_angle: 200         # 转向角度限制（物理角度）
+  emergency_brake_threshold: 5.0  # 紧急制动触发速度差阈值
+  min_safe_distance: 2.0          # 最小安全距离
+
+hardware:  # 硬件与接口
+  use_gpu: true
+  cuda_mem_fraction: 0.8          # CUDA 显存占用上限（best-effort）
+  dry_run: false                  # 调试时设 true，不发 CAN
+  can_interface: "can1"
+  can_id: 0x210
+
+logging:  # 日志
+  save_folder: "/home/nvidia/Autodrive/results/DACER_TORCH_CAR"
+  tensorboard_flush_secs: 20
+  verbose: true
