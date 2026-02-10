@@ -265,6 +265,25 @@ class PVPDACERTorch:
             alpha_loss = -(self.agent.log_alpha * (-self._last_entropy.detach() + float(self.cfg.target_entropy))).mean()
             self.optim_alpha.zero_grad(set_to_none=True)
             alpha_loss.backward()
+
+
+
+
+        # === 请添加以下代码块来定义 metrics ===
+        metrics = {
+            "q1_loss": q1_loss.item(),
+            "q2_loss": q2_loss.item(),
+            "policy_loss": policy_loss.item(),
+            "rl_loss": rl_loss.item(),
+            "bc_loss": bc_loss.item(),
+            "alpha_loss": alpha_loss.item(),
+            "q1_mean": q1_mean.mean().item(),
+            "q2_mean": q2_mean.mean().item(),
+            "mean_q1_std": self.mean_q1_std.item(),
+            "mean_q2_std": self.mean_q2_std.item(),
+        }
+
+        
         return metrics
 
     def save(self, path: str) -> None:

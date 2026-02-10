@@ -351,6 +351,12 @@ class CarPVPTD3Torch(Node):
             metrics = self.model.train(buffer=self.buffer, batch_size=bs, gradient_steps=gradient_steps)
             if metrics:
                 self.training_metrics.update(metrics)
+                # === 新增代码：打印训练 Loss ===
+                # 获取 critic loss 和 actor loss，键名取决于你的 TorchPVPTD3 实现
+                c_loss = metrics.get('critic_loss', 0.0) 
+                a_loss = metrics.get('actor_loss', 0.0)
+                self.get_logger().info(f"[Train] Critic Loss: {c_loss:.4f} | Actor Loss: {a_loss:.4f}")
+                # ============================
         except Exception as e:
             self.get_logger().error(f"Train failed: {e}")
 
@@ -420,6 +426,12 @@ class CarPVPTD3Torch(Node):
         self.last_timestamp = float(now_ts)
 
         if self.rcvMsgSurroundingInfo is None:
+
+# === 新增代码：如果没收到消息，每隔2秒打印一次提示 ===
+            self.get_logger().info("等待 Topic 数据: surrounding_info_data ...", throttle_duration_sec=2.0)
+            # ================================================
+            return
+
             return
 
         if self.is_paused:
@@ -468,6 +480,19 @@ class CarPVPTD3Torch(Node):
 
         self.last_action_model = np.asarray(action_novice, dtype=np.float32).copy()
         self.send_action(action_novice)
+
+
+# === 新增代码：每10帧（约1秒）打印一次状态 ===
+        if self.iteration % 10 == 0:
+            mode_str = "Human" if intervention > 0.5 else "Auto"
+            act_str = np.array2string(action_novice, precision=2, separator=',')
+            self.get_logger().info(
+                f"Iter: {self.iteration} | Mode: {mode_str} | "
+                f"Spd: {self.last_state_carspeed:.1f} | "
+                f"ErrD: {self.last_state_error_distance:.2f} | "
+                f"Action(Model): {act_str}"
+            )
+
 
         if self.prev_action_sent_for_smooth is None:
             self.last_action_smooth_l1 = 0.0

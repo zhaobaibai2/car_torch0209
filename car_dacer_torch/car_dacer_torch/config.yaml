@@ -71,7 +71,7 @@ hardware:  # 硬件与接口
 
 eval:  # 实车评估（eval）配置
   model_dir: "/home/nvidia/Autodrive/results/DACER_TORCH_CAR/models/"  # 默认从这里选最新pt
-  model_path: null                 # 手动指定某个pt（优先级最高）
+  model_path: "/home/nvidia/Autodrive/results/DACER_TORCH_CAR_260209-232027/models/dacer_torch_00003000.pt"                # 手动指定某个pt（优先级最高）
   deterministic: true              # 默认确定性采样（真正确定性：eval里会关闭agent内部噪声）
   noise_std: 0.05                  # noisy评估模式下，动作额外高斯噪声标准差
 
