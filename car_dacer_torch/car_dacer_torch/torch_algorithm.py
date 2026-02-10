@@ -76,8 +76,8 @@ class PVPDACERTorch:
         self._last_entropy = torch.tensor(0.0, device=self.device, dtype=torch.float32)
 
     @torch.no_grad()
-    def get_action(self, obs: torch.Tensor, *, deterministic: bool = False) -> torch.Tensor:
-        return self.agent.get_action(obs, deterministic=deterministic)
+    def get_action(self, obs: torch.Tensor, *, deterministic: bool = False, add_noise: bool = True) -> torch.Tensor:
+        return self.agent.get_action(obs, deterministic=deterministic, add_noise=add_noise)
 
     def _update_mean_q_std(self, prev: torch.Tensor, new: torch.Tensor) -> torch.Tensor:
         if prev.item() < 0.0:

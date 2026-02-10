@@ -154,7 +154,7 @@ class DACERTorchAgent(nn.Module):
     def soft_update_targets(self, tau: float):
         self._sync_targets(tau=tau)
 
-    def get_action(self, obs: torch.Tensor, *, deterministic: bool = False) -> torch.Tensor:
+    def get_action(self, obs: torch.Tensor, *, deterministic: bool = False, add_noise: bool = True) -> torch.Tensor:
         obs = obs.to(self.device, dtype=torch.float32)
         if obs.dim() == 1:
             obs = obs.unsqueeze(0)
@@ -167,8 +167,9 @@ class DACERTorchAgent(nn.Module):
         else:
             action = self.diffusion.p_sample(model, (obs.shape[0], self.act_dim))
 
-        noise = torch.randn_like(action)
-        action = action + noise * torch.exp(self.log_alpha) * self.action_noise_scale
+        if bool(add_noise):
+            noise = torch.randn_like(action)
+            action = action + noise * torch.exp(self.log_alpha) * self.action_noise_scale
         return action.clamp(-1.0, 1.0)
 
     def q(self, which: int, obs: torch.Tensor, act: torch.Tensor, *, target: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:

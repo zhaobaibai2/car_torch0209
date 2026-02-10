@@ -277,27 +277,47 @@ class CarDACERTorch(Node):
         for file_path in all_files:
             try:
                 self.get_logger().info(f"[批量加载] 正在加载: {os.path.basename(file_path)}")
-                
-                # 创建临时buffer来加载单个文件
-                temp_buffer = TorchPVPBuffer(
-                    max_size=self.buffer.max_size,
-                    obs_dim=self.buffer.obs_dim,
-                    act_dim=self.buffer.act_dim,
-                )
-                temp_buffer.load(file_path)
-                
-                # 合并到主buffer
-                for exp in list(temp_buffer.human_buffer):
-                    self.buffer.add_human(exp)
-                    total_human += 1
-                
-                for exp in list(temp_buffer.pvp_buffer):
-                    self.buffer.add_pvp(exp)
-                    total_pvp += 1
-                
-                loaded_count += 1
-                self.get_logger().info(f"[批量加载] 完成: {os.path.basename(file_path)} "
-                                     f"(Human: {len(temp_buffer.human_buffer)}, PVP: {len(temp_buffer.pvp_buffer)})")
+
+                base = os.path.basename(file_path)
+                if base.startswith('segment_'):
+                    with open(file_path, 'rb') as f:
+                        payload = pickle.load(f)
+                    human_list = payload.get('human', [])
+                    pvp_list = payload.get('pvp', [])
+
+                    for exp in list(human_list):
+                        self.buffer.add_human(exp)
+                        total_human += 1
+                    for exp in list(pvp_list):
+                        self.buffer.add_pvp(exp)
+                        total_pvp += 1
+
+                    loaded_count += 1
+                    self.get_logger().info(
+                        f"[批量加载] 完成: {base} (Human: {len(human_list)}, PVP: {len(pvp_list)})"
+                    )
+                else:
+                    # 创建临时buffer来加载单个文件
+                    temp_buffer = TorchPVPBuffer(
+                        max_size=self.buffer.max_size,
+                        obs_dim=self.buffer.obs_dim,
+                        act_dim=self.buffer.act_dim,
+                    )
+                    temp_buffer.load(file_path)
+
+                    # 合并到主buffer
+                    for exp in list(temp_buffer.human_buffer):
+                        self.buffer.add_human(exp)
+                        total_human += 1
+
+                    for exp in list(temp_buffer.pvp_buffer):
+                        self.buffer.add_pvp(exp)
+                        total_pvp += 1
+
+                    loaded_count += 1
+                    self.get_logger().info(
+                        f"[批量加载] 完成: {base} (Human: {len(temp_buffer.human_buffer)}, PVP: {len(temp_buffer.pvp_buffer)})"
+                    )
                 
             except Exception as e:
                 self.get_logger().error(f"[批量加载] 文件加载失败 {file_path}: {e}")
