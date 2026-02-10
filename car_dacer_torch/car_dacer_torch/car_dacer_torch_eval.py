@@ -205,6 +205,7 @@ class CarDACERTorchEval(Node):
             'ts',
             'iter',
             'process_time',
+            'infer_time',
             'gearpos',
             'car_run_mode',
             'error_yaw',
@@ -328,9 +329,11 @@ class CarDACERTorchEval(Node):
         return msg, canData
 
     @torch.no_grad()
-    def _compute_action(self, state: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def _compute_action(self, state: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+        t0 = time.time()
         obs = torch.from_numpy(np.expand_dims(state, axis=0).astype(np.float32)).to(self.device)
         action = self.algorithm.get_action(obs, deterministic=self.eval_deterministic, add_noise=False)
+        infer_time = float(time.time() - t0)
         action = action.detach().cpu().numpy().flatten().astype(np.float32)
         action = np.clip(action, -1.0, 1.0)
 
@@ -339,7 +342,7 @@ class CarDACERTorchEval(Node):
             noise = np.random.randn(*action_sent.shape).astype(np.float32) * float(self.eval_noise_std)
             action_sent = np.clip(action_sent + noise, -1.0, 1.0)
 
-        return action, action_sent
+        return action, action_sent, infer_time
 
     def _send_action(self, action_sent: np.ndarray, state: np.ndarray) -> Tuple[int, int, float, bool, list]:
         throttle_percentage, braking_percentage, steering_angle = self.process_action(action_sent)
@@ -383,7 +386,7 @@ class CarDACERTorchEval(Node):
             except Exception:
                 pass
 
-        action_raw, action_sent = self._compute_action(state)
+        action_raw, action_sent, infer_time = self._compute_action(state)
         sent_th, sent_br, sent_steer, safety_override, can_bytes = self._send_action(action_sent, state)
 
         process_time = time.time() - now_ts
@@ -394,6 +397,7 @@ class CarDACERTorchEval(Node):
             'ts': now_ts,
             'iter': self.iteration,
             'process_time': process_time,
+            'infer_time': float(infer_time),
             'gearpos': self._safe_get(self.rcvMsgSurroundingInfo, 'gearpos', None),
             'car_run_mode': self._safe_get(self.rcvMsgSurroundingInfo, 'car_run_mode', None),
             'error_yaw': self._safe_get(self.rcvMsgSurroundingInfo, 'error_yaw', None),
@@ -435,11 +439,13 @@ class CarDACERTorchEval(Node):
             takeover_rate = float(np.mean(np.asarray(self.takeover_recorder)) * 100.0) if self.takeover_recorder else 0.0
 
             self.writer.add_scalar('Timing/process_time_ms', float(process_time) * 1000.0, self.iteration)
+            self.writer.add_scalar('Timing/infer_time_ms', float(infer_time) * 1000.0, self.iteration)
             self.writer.add_scalar('Time/elapsed_s', float(time.time() - self.start_wall_time), self.iteration)
             self.writer.add_scalar('Vehicle/carspeed', float(self._safe_get(self.rcvMsgSurroundingInfo, 'carspeed', 0.0)), self.iteration)
             self.writer.add_scalar('Vehicle/error_yaw', float(self._safe_get(self.rcvMsgSurroundingInfo, 'error_yaw', 0.0)), self.iteration)
             self.writer.add_scalar('Vehicle/error_distance', float(self._safe_get(self.rcvMsgSurroundingInfo, 'error_distance', 0.0)), self.iteration)
             self.writer.add_scalar('Vehicle/takeover_rate', float(takeover_rate), self.iteration)
+            self.writer.add_scalar('takeover_rate', float(takeover_rate), self.iteration)
 
             self.writer.add_scalar('Action/raw_x', float(action_raw[0]), self.iteration)
             self.writer.add_scalar('Action/raw_y', float(action_raw[1]), self.iteration)

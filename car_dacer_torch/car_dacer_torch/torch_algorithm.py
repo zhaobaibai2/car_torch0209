@@ -133,6 +133,9 @@ class PVPDACERTorch:
         self.agent.train()
         self.step += 1
 
+        q_behavior_means = []
+        q_novice_means = []
+
         obs = batch.obs
         next_obs = batch.next_obs
         reward = batch.reward * float(self.cfg.reward_scale)
@@ -210,6 +213,9 @@ class PVPDACERTorch:
         rl_loss = torch.tensor(0.0, device=self.device)
         bc_loss = torch.tensor(0.0, device=self.device)
 
+        q_behavior_means.append(float(q1_mean.mean().detach().cpu()))
+        q_novice_means.append(float(q2_mean.mean().detach().cpu()))
+
         if self.step % int(self.cfg.delay_update) == 0:
             for p in self.agent.q1.parameters():
                 p.requires_grad_(False)
@@ -259,24 +265,6 @@ class PVPDACERTorch:
             alpha_loss = -(self.agent.log_alpha * (-self._last_entropy.detach() + float(self.cfg.target_entropy))).mean()
             self.optim_alpha.zero_grad(set_to_none=True)
             alpha_loss.backward()
-            self.optim_alpha.step()
-
-        metrics: Dict[str, float] = {
-            'train/q1_loss': float(q1_loss.detach().cpu()),
-            'train/q2_loss': float(q2_loss.detach().cpu()),
-            'train/td1_loss': float(q1_td_loss.detach().cpu()),
-            'train/td2_loss': float(q2_td_loss.detach().cpu()),
-            'train/pv_loss': float(pv_loss.detach().cpu()),
-            'train/policy_loss': float(policy_loss.detach().cpu()),
-            'train/rl_loss': float(rl_loss.detach().cpu()),
-            'train/bc_loss': float(bc_loss.detach().cpu()),
-            'train/alpha': float(torch.exp(self.agent.log_alpha.detach()).cpu()),
-            'train/alpha_loss': float(alpha_loss.detach().cpu()),
-            'stat/intervention_rate': float(interventions.mean().detach().cpu()),
-            'stat/td_mask_mean': float((1.0 - stop_td).mean().detach().cpu()),
-            'val/q_behavior': float(q1_mean_1d.mean().detach().cpu()),
-        }
-
         return metrics
 
     def save(self, path: str) -> None:

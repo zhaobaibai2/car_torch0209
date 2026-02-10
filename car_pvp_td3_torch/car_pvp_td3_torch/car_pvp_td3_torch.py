@@ -78,6 +78,7 @@ class CarPVPTD3Torch(Node):
 
         self._prev_state = None
         self._prev_action_novice = None
+        self._prev_action_behavior = None
         self._prev_intervention = 0.0
 
         self._init_logging()
@@ -299,13 +300,13 @@ class CarPVPTD3Torch(Node):
         return np.clip(action, -1.0, 1.0), infer_time
 
     def _store_transition_from_prev(self, next_state: np.ndarray, intervention: float, stop_boundary: bool, action_behavior: np.ndarray):
-        if self._prev_state is None or self._prev_action_novice is None:
+        if self._prev_state is None or self._prev_action_novice is None or self._prev_action_behavior is None:
             return
 
         obs = np.asarray(self._prev_state, dtype=np.float32)
         next_obs = np.asarray(next_state, dtype=np.float32)
         action_novice = np.asarray(self._prev_action_novice, dtype=np.float32)
-        action_behavior = np.asarray(action_behavior, dtype=np.float32)
+        action_behavior = np.asarray(self._prev_action_behavior, dtype=np.float32)
 
         exp = Experience.from_pvp(
             obs=obs,
@@ -329,7 +330,7 @@ class CarPVPTD3Torch(Node):
                 'obs': obs,
                 'next_obs': next_obs,
                 'action_novice': action_novice,
-                'action_behavior': np.asarray(action_behavior, dtype=np.float32),
+                'action_behavior': self._prev_action_behavior,
                 'intervention': float(intervention),
                 'takeover_start': bool(stop_boundary),
                 'timestamp': float(self.last_timestamp),
@@ -375,6 +376,12 @@ class CarPVPTD3Torch(Node):
         buffer_stats = self.buffer.get_statistics()
 
         try:
+            for k, v in (self.training_metrics or {}).items():
+                try:
+                    self.writer.add_scalar(str(k), float(v), self.iteration)
+                except Exception:
+                    pass
+
             self.writer.add_scalar('takeover_rate', takeover_rate, self.iteration)
             self.writer.add_scalar('Timing/process_time_ms', float(self.last_process_time) * 1000.0, self.iteration)
             self.writer.add_scalar('Timing/infer_time_ms', float(self.last_infer_time) * 1000.0, self.iteration)
@@ -470,6 +477,7 @@ class CarPVPTD3Torch(Node):
 
         self._prev_state = state.copy()
         self._prev_action_novice = action_novice.copy()
+        self._prev_action_behavior = np.asarray(action_behavior, dtype=np.float32).copy()
         self._prev_intervention = float(intervention)
 
         self.last_intervention = float(intervention)

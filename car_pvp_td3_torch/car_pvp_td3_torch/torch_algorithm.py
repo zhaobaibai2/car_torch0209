@@ -73,14 +73,18 @@ class TorchPVPTD3:
 
         critic_losses = []
         actor_losses = []
+        q_behavior_means = []
+        q_novice_means = []
 
         for _ in range(int(gradient_steps)):
             batch = self._sample_batch(buffer, batch_size)
             if batch is None:
                 break
 
-            critic_loss = self._update_critic(batch)
+            critic_loss, q_behavior_mean, q_novice_mean = self._update_critic(batch)
             critic_losses.append(critic_loss)
+            q_behavior_means.append(float(q_behavior_mean))
+            q_novice_means.append(float(q_novice_mean))
 
             if self.step % int(self.cfg.policy_delay) == 0:
                 actor_loss = self._update_actor(batch)
@@ -92,6 +96,8 @@ class TorchPVPTD3:
 
         if critic_losses:
             metrics["train/critic_loss"] = float(sum(critic_losses) / len(critic_losses))
+            metrics["train/q_behavior_mean"] = float(sum(q_behavior_means) / len(q_behavior_means))
+            metrics["train/q_novice_mean"] = float(sum(q_novice_means) / len(q_novice_means))
         if actor_losses:
             metrics["train/actor_loss"] = float(sum(actor_losses) / len(actor_losses))
         return metrics
@@ -103,7 +109,7 @@ class TorchPVPTD3:
             exps = buffer.sample_pvp(batch_size)
         return buffer.to_pvp_batch(exps, device=self.device)
 
-    def _update_critic(self, batch: PVPBatch) -> float:
+    def _update_critic(self, batch: PVPBatch) -> tuple[float, float, float]:
         with torch.no_grad():
             noise = torch.randn_like(batch.actions_behavior) * self.cfg.target_policy_noise
             noise = noise.clamp(-self.cfg.target_noise_clip, self.cfg.target_noise_clip)
@@ -139,7 +145,10 @@ class TorchPVPTD3:
         critic_loss.backward()
         self.optim_critic.step()
 
-        return float(critic_loss.detach().cpu())
+        q_behavior_mean = float(q1_b.mean().detach().cpu())
+        q_novice_mean = float(q1_n.mean().detach().cpu())
+
+        return float(critic_loss.detach().cpu()), q_behavior_mean, q_novice_mean
 
     def _update_actor(self, batch: PVPBatch) -> float:
         action = self.actor(batch.obs)

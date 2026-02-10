@@ -354,6 +354,8 @@ class CarIWREnsembleTorch(Node):
             self.writer.add_scalar('Timing/infer_time_ms', float(self.last_infer_time) * 1000.0, self.iteration)
             self.writer.add_scalar('Time/elapsed_s', float(time.time() - self.start_wall_time), self.iteration)
 
+            self.writer.add_scalar('Buffer/dataset_size', float(len(self.dataset_X)), self.iteration)
+
             self.writer.add_scalar('Vehicle/carspeed', float(self.last_state_carspeed), self.iteration)
             self.writer.add_scalar('Vehicle/error_yaw', float(self.last_state_error_yaw), self.iteration)
             self.writer.add_scalar('Vehicle/error_distance', float(self.last_state_error_distance), self.iteration)

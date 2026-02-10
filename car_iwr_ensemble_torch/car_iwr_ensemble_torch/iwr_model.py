@@ -11,7 +11,7 @@ class Model(nn.Module):
         last_dim = state_dim
         for nh in hidden_size:
             layer = nn.Linear(last_dim, nh)
-            nn.init.xavier_uniform(layer.weight)
+            nn.init.xavier_uniform_(layer.weight)
             self.affine_layers.append(layer)
             last_dim = nh
 
@@ -35,9 +35,8 @@ class Ensemble(nn.Module):
         self.device = device
         self.num_nets = num_nets
         # build policy and value functions
-        self.pis = [Model(obs_dim, act_dim, hidden_sizes) for _ in range(num_nets)]
-        for pi in self.pis:
-            pi.to(device).float()
+        self.pis = nn.ModuleList([Model(obs_dim, act_dim, hidden_sizes) for _ in range(num_nets)])
+        self.to(device)
 
     def act(self, obs, i=-1):
         obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
@@ -58,9 +57,15 @@ class Ensemble(nn.Module):
             return np.square(np.std(np.array(vals), axis=0)).mean()
 
     def load(self, path):
-        state = torch.load(path)
+        state = torch.load(path, map_location=self.device)
         for net_id, net_state in state.items():
-            self.pis[int(net_id[-1])].load_state_dict(net_state)
+            try:
+                idx = int(str(net_id).split('_')[-1])
+            except Exception:
+                idx = int(str(net_id)[-1])
+            if idx < 0 or idx >= len(self.pis):
+                continue
+            self.pis[idx].load_state_dict(net_state)
 
     def save(self, path):
         state = {"ensemble_net_{}".format(i): self.pis[i].state_dict() for i in range(len(self.pis))}
