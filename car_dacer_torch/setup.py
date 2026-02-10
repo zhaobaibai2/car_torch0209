@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'car_dacer_torch = car_dacer_torch.car_dacer_torch:main',
+            'car_dacer_torch_skip = car_dacer_torch.car_dacer_torch_skip:main',
             'car_dacer_torch_eval_det = car_dacer_torch.car_dacer_torch_eval:main_det',
             'car_dacer_torch_eval_noisy = car_dacer_torch.car_dacer_torch_eval:main_noisy',
         ],

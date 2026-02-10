@@ -41,14 +41,30 @@ class CarDACERTorchEval(Node):
 
         self.rcvMsgSurroundingInfo: Optional[SurroundingInfoInterface] = None
         self.iteration = 0
+        self.start_wall_time = time.time()
+        self.takeover_recorder = []
+        self.takeover_max_len = 2000
 
         self._init_safety()
         self._init_device()
         self._init_algo()
         self._init_can()
         self._init_log_file()
+        self._init_tensorboard()
 
         self.get_logger().info(self._startup_banner())
+
+    def _init_tensorboard(self):
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            self.writer = SummaryWriter(
+                log_dir=self.config['save_folder'],
+                flush_secs=self.config.get('logging', {}).get('tensorboard_flush_secs', 20),
+            )
+            self.use_tensorboard = True
+        except Exception:
+            self.writer = None
+            self.use_tensorboard = False
 
     def _startup_banner(self) -> str:
         mode = 'NOISY' if self.noisy else 'DETERMINISTIC'
@@ -404,6 +420,35 @@ class CarDACERTorchEval(Node):
         }
         self._csv_writer.writerow(row)
         self._csv_f.flush()
+
+        # 评估指标：TensorBoard 记录（节流，避免刷屏/写盘过快）
+        if self.use_tensorboard and (self.iteration % 10 == 0):
+            car_run_mode = self._safe_get(self.rcvMsgSurroundingInfo, 'car_run_mode', 1)
+            try:
+                intervention = 0.0 if int(car_run_mode) == 1 else 1.0
+            except Exception:
+                intervention = 0.0
+
+            self.takeover_recorder.append(float(intervention))
+            if len(self.takeover_recorder) > int(self.takeover_max_len):
+                self.takeover_recorder = self.takeover_recorder[-int(self.takeover_max_len):]
+            takeover_rate = float(np.mean(np.asarray(self.takeover_recorder)) * 100.0) if self.takeover_recorder else 0.0
+
+            self.writer.add_scalar('Timing/process_time_ms', float(process_time) * 1000.0, self.iteration)
+            self.writer.add_scalar('Time/elapsed_s', float(time.time() - self.start_wall_time), self.iteration)
+            self.writer.add_scalar('Vehicle/carspeed', float(self._safe_get(self.rcvMsgSurroundingInfo, 'carspeed', 0.0)), self.iteration)
+            self.writer.add_scalar('Vehicle/error_yaw', float(self._safe_get(self.rcvMsgSurroundingInfo, 'error_yaw', 0.0)), self.iteration)
+            self.writer.add_scalar('Vehicle/error_distance', float(self._safe_get(self.rcvMsgSurroundingInfo, 'error_distance', 0.0)), self.iteration)
+            self.writer.add_scalar('Vehicle/takeover_rate', float(takeover_rate), self.iteration)
+
+            self.writer.add_scalar('Action/raw_x', float(action_raw[0]), self.iteration)
+            self.writer.add_scalar('Action/raw_y', float(action_raw[1]), self.iteration)
+            self.writer.add_scalar('Action/sent_x', float(action_sent[0]), self.iteration)
+            self.writer.add_scalar('Action/sent_y', float(action_sent[1]), self.iteration)
+            self.writer.add_scalar('Action/sent_throttle', float(sent_th), self.iteration)
+            self.writer.add_scalar('Action/sent_brake', float(sent_br), self.iteration)
+            self.writer.add_scalar('Action/sent_steer', float(sent_steer), self.iteration)
+            self.writer.add_scalar('Safety/safety_override', float(1.0 if safety_override else 0.0), self.iteration)
 
     def destroy_node(self):
         try:

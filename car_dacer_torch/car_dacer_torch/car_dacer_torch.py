@@ -69,6 +69,26 @@ class CarDACERTorch(Node):
         self._prev_state = None
         self._prev_action_novice = None
 
+        # 运行指标缓存：用于 TensorBoard/终端统计（不改变训练逻辑，只做记录）
+        self.start_wall_time = time.time()
+        self.last_timestamp = 0.0
+        self.last_process_time = 0.0
+        self.last_intervention = 0.0
+        self.last_state_error_yaw = 0.0
+        self.last_state_error_distance = 0.0
+        self.last_state_carspeed = 0.0
+
+        self.last_action_human = np.zeros(2, dtype=np.float32)
+        self.last_action_model = np.zeros(2, dtype=np.float32)
+        self.last_action_sent = np.zeros(2, dtype=np.float32)
+        self.last_sent_throttle = 0
+        self.last_sent_brake = 0
+        self.last_sent_steer = 0.0
+        self.last_safety_override = 0
+
+        self.prev_action_sent_for_smooth = None
+        self.last_action_smooth_l1 = 0.0
+
         # 分段数据缓存：用于按 P 暂停时立即落盘当前段
         self.segment_human_buffer = []
         self.segment_pvp_buffer = []
@@ -503,10 +523,19 @@ class CarDACERTorch(Node):
         throttle_percentage, braking_percentage, steering_angle = self.process_action(action)
 
         state = self.get_state()
+        safety_override = 0
         if not self.safety_manager.check_action_safety(action, state):
             throttle_percentage = 0
             braking_percentage = 100
             steering_angle = 0.0
+            safety_override = 1
+
+        # 记录实际下发动作（可能被 safety 覆盖），用于 TensorBoard
+        self.last_action_sent = np.asarray(action, dtype=np.float32).copy()
+        self.last_sent_throttle = int(throttle_percentage)
+        self.last_sent_brake = int(braking_percentage)
+        self.last_sent_steer = float(steering_angle)
+        self.last_safety_override = int(safety_override)
 
         gearpos = 0x03
         enableSignal = 1
@@ -568,6 +597,9 @@ class CarDACERTorch(Node):
             self.rcvMsgSurroundingInfo.steerangle,
         )
 
+        # 记录 human 行为动作（用于 TensorBoard）
+        self.last_action_human = np.asarray(action_behavior, dtype=np.float32).copy()
+
         takeover_start = (intervention == 1.0 and self._prev_intervention == 0.0)
         takeover_end = (intervention == 0.0 and self._prev_intervention == 1.0)
         stop_td = 1.0 if (takeover_start or takeover_end) else 0.0
@@ -587,11 +619,26 @@ class CarDACERTorch(Node):
             batch_data.append(exp)
 
         action_novice = self._compute_action(state)
+
+        # 记录模型动作（用于 TensorBoard）
+        self.last_action_model = np.asarray(action_novice, dtype=np.float32).copy()
         self.send_action(action_novice)
+
+        # 动作平滑度（舒适度代理）：统计连续下发动作变化幅度
+        if self.prev_action_sent_for_smooth is None:
+            self.last_action_smooth_l1 = 0.0
+        else:
+            self.last_action_smooth_l1 = float(np.mean(np.abs(self.last_action_sent - self.prev_action_sent_for_smooth)))
+        self.prev_action_sent_for_smooth = self.last_action_sent.copy()
 
         self._prev_state = state.copy()
         self._prev_action_novice = action_novice.copy()
         self._prev_intervention = intervention
+
+        self.last_intervention = float(intervention)
+        self.last_state_error_yaw = float(getattr(self.rcvMsgSurroundingInfo, 'error_yaw', 0.0))
+        self.last_state_error_distance = float(getattr(self.rcvMsgSurroundingInfo, 'error_distance', 0.0))
+        self.last_state_carspeed = float(getattr(self.rcvMsgSurroundingInfo, 'carspeed', 0.0))
 
         return batch_data
 
@@ -699,10 +746,34 @@ class CarDACERTorch(Node):
             self.writer.add_scalar('Safety/steer_violations', safety_stats['steer_violations'], self.iteration)
             self.writer.add_scalar('takeover_rate', takeover_rate, self.iteration)
 
+            # 运行/车辆关键指标
+            self.writer.add_scalar('Timing/process_time_ms', float(self.last_process_time) * 1000.0, self.iteration)
+            self.writer.add_scalar('Time/elapsed_s', float(time.time() - self.start_wall_time), self.iteration)
+
+            self.writer.add_scalar('Vehicle/carspeed', float(self.last_state_carspeed), self.iteration)
+            self.writer.add_scalar('Vehicle/error_yaw', float(self.last_state_error_yaw), self.iteration)
+            self.writer.add_scalar('Vehicle/error_distance', float(self.last_state_error_distance), self.iteration)
+            self.writer.add_scalar('Vehicle/intervention', float(self.last_intervention), self.iteration)
+
+            # 动作对齐：human / model / sent
+            self.writer.add_scalar('Action/human_x', float(self.last_action_human[0]), self.iteration)
+            self.writer.add_scalar('Action/human_y', float(self.last_action_human[1]), self.iteration)
+            self.writer.add_scalar('Action/model_x', float(self.last_action_model[0]), self.iteration)
+            self.writer.add_scalar('Action/model_y', float(self.last_action_model[1]), self.iteration)
+            self.writer.add_scalar('Action/sent_throttle', float(self.last_sent_throttle), self.iteration)
+            self.writer.add_scalar('Action/sent_brake', float(self.last_sent_brake), self.iteration)
+            self.writer.add_scalar('Action/sent_steer', float(self.last_sent_steer), self.iteration)
+            self.writer.add_scalar('Safety/safety_override', float(self.last_safety_override), self.iteration)
+
+            # 舒适度代理：动作变化幅度（越小越平滑）
+            self.writer.add_scalar('Comfort/action_smooth_l1', float(self.last_action_smooth_l1), self.iteration)
+
     def pub_callback_car_dacer_torch(self):
         msg = CarRLInterface()
         now_ts = time.time()
         msg.timestamp = now_ts
+
+        self.last_timestamp = float(now_ts)
 
         if self.rcvMsgSurroundingInfo is None:
             return
@@ -780,6 +851,7 @@ class CarDACERTorch(Node):
             self._save_model()
 
         msg.process_time = time.time() - now_ts
+        self.last_process_time = float(msg.process_time)
         self.pubCarDACER.publish(msg)
 
         tjitools.ros_log(self.get_name(), 'Publish car_dacer_torch msg !!!')
