@@ -1,0 +1,42 @@
+framework: "iwr_ensemble"
+seed: 42
+
+env:
+  state_dim: 344
+  action_dim: 2
+
+model:
+  hidden_sizes: [256, 256]
+  num_nets: 5
+
+training:
+  enable_online_update: false
+  update_interval: 10
+  batch_size: 256
+  lr: 1.0e-3
+  lambda_l2: 1.0e-5
+  epochs_per_update: 1
+  max_dataset_size: 50000
+  log_save_interval: 100
+  save_interval: 1000
+
+safety:
+  max_steering_angle: 200
+  emergency_brake_threshold: 5.0
+  min_safe_distance: 2.0
+
+hardware:
+  use_gpu: true
+  cuda_mem_fraction: 0.8
+  dry_run: false
+  can_interface: "can1"
+  can_id: 0x210
+
+eval:
+  model_dir: "/home/nvidia/Autodrive/results/IWR_CAR/models/"
+  model_path: null
+  deterministic: true
+  noise_std: 0.05
+
+logging:
+  tensorboard_flush_secs: 20

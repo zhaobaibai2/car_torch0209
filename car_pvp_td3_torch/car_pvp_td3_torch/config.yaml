@@ -1,0 +1,55 @@
+framework: "pvp_td3"
+seed: 42
+
+env:
+  state_dim: 344
+  action_dim: 2
+
+algo:
+  use_balance_sample: true
+  reward_free: true
+  learning_rate: 1.0e-4
+  buffer_size: 50000
+  learning_starts: 100
+  tau: 0.005
+  gamma: 0.99
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  q_value_bound: 1.0
+  cql_coefficient: 1.0
+  intervention_start_stop_td: true
+  human_ratio: 0.5
+
+network:
+  actor_hidden_dims: [256, 256]
+  critic_hidden_dims: [256, 256]
+
+training:
+  enable_online_update: false
+  update_interval: 5
+  gradient_steps: 1
+  batch_size: 128
+  log_save_interval: 100
+  save_interval: 1000
+
+safety:
+  max_steering_angle: 200
+  emergency_brake_threshold: 5.0
+  min_safe_distance: 2.0
+
+hardware:
+  use_gpu: true
+  cuda_mem_fraction: 0.8
+  dry_run: false
+  can_interface: "can1"
+  can_id: 0x210
+
+eval:
+  model_dir: "/home/nvidia/Autodrive/results/PVP_TD3_CAR/models/"
+  model_path: null
+  deterministic: true
+  noise_std: 0.05
+
+logging:
+  tensorboard_flush_secs: 20
