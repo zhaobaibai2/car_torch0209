@@ -18,7 +18,7 @@ training:  # 训练与阶段管理
   phase2_bc_updates_per_iter: 100   # Phase2 每次触发做几步 BC，调大=更快完成 Phase2
   replay_batch_size: 64           # 训练批大小（BC/PVP 共用）
   max_iteration: 1000000
-  log_save_interval: 1000          # TensorBoard 记录间隔
+  log_save_interval: 200          # TensorBoard 记录间隔（更高频便于观测接管率/损失）
   apprfunc_save_interval: 1000     # 模型/缓冲保存间隔
   policy_update_time: 1           # 预留字段
   demo_data_path: null            # 单个buffer文件路径
@@ -40,14 +40,14 @@ algorithm:  # 算法超参
   target_entropy: -2.0
   num_timesteps: 10               # 扩散步数（越小越快，精度略降）
   num_samples: 100                # 采样数（推理/训练加噪）
-  lambda_pv: 1.0                  # PV 损失权重
-  B: 1.0                          # PV 边界 B
-  lambda_bc: 5.0                  # BC boost 权重（干预段）
+  lambda_pv: 2.0                  # PV 损失权重（增强约束）
+  B: 1.5                          # PV 边界 B（增强 human>0 / novice<0 分离）
+  lambda_bc: 2.0                  # BC boost 权重（保留但降低强度）
   reward_free: true               # 干预段屏蔽 TD（无回报模式）
   phase3_use_bc_boost: true       # Phase3 干预样本做 diffusion BC boost
   fix_alpha: true                 # 固定 alpha，不自适应
   init_alpha: 0.1                 # 初始 alpha（fix_alpha 时固定为此）
-  action_noise_scale: 0.05        # 动作探索噪声尺度
+  action_noise_scale: 0.01        # 动作探索噪声尺度（降低抖动）
 
 network:  # 网络结构
   hidden_dims: [256, 256, 256]

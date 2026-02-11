@@ -266,24 +266,19 @@ class PVPDACERTorch:
             self.optim_alpha.zero_grad(set_to_none=True)
             alpha_loss.backward()
 
-
-
-
-        # === 请添加以下代码块来定义 metrics ===
         metrics = {
-            "q1_loss": q1_loss.item(),
-            "q2_loss": q2_loss.item(),
-            "policy_loss": policy_loss.item(),
-            "rl_loss": rl_loss.item(),
-            "bc_loss": bc_loss.item(),
-            "alpha_loss": alpha_loss.item(),
-            "q1_mean": q1_mean.mean().item(),
-            "q2_mean": q2_mean.mean().item(),
-            "mean_q1_std": self.mean_q1_std.item(),
-            "mean_q2_std": self.mean_q2_std.item(),
+            "train/q1_loss": float(q1_loss.detach().cpu()),
+            "train/q2_loss": float(q2_loss.detach().cpu()),
+            "train/policy_loss": float(policy_loss.detach().cpu()),
+            "train/rl_loss": float(rl_loss.detach().cpu()),
+            "train/bc_loss": float(bc_loss.detach().cpu()),
+            "train/alpha_loss": float(alpha_loss.detach().cpu()),
+            "train/q_behavior_mean": float(sum(q_behavior_means) / len(q_behavior_means)) if q_behavior_means else 0.0,
+            "train/q_novice_mean": float(sum(q_novice_means) / len(q_novice_means)) if q_novice_means else 0.0,
+            "train/mean_q1_std": float(self.mean_q1_std.detach().cpu()),
+            "train/mean_q2_std": float(self.mean_q2_std.detach().cpu()),
         }
 
-        
         return metrics
 
     def save(self, path: str) -> None:
